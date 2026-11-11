@@ -38,8 +38,8 @@ data "aws_caller_identity" "atual" {}
 data "aws_partition" "atual" {}
 
 locals {
-  conta     = data.aws_caller_identity.atual.account_id
-  particao  = data.aws_partition.atual.partition
-  prefixo   = "loja-${var.ambiente}"
-  raiz_arn  = "arn:${local.particao}:iam::${local.conta}:root"
+  conta    = data.aws_caller_identity.atual.account_id
+  particao = data.aws_partition.atual.partition
+  prefixo  = "loja-${var.ambiente}"
+  raiz_arn = "arn:${local.particao}:iam::${local.conta}:root"
 }

@@ -132,7 +132,7 @@ jobs:
           docker run -d --name api -p 8080:8080 \
             -e SEGREDOS_FONTE=env -e JWT_SECRET="$(openssl rand -hex 32)" -e WEBHOOK_SECRET="$(openssl rand -hex 32)" \
             "loja-api:$ALVO"
-          curl -sf --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/saude
+          curl -sf --retry 30 --retry-all-errors --retry-delay 1 http://localhost:8080/saude || { docker logs api; exit 1; }
           chmod a+w .zap
           scripts/esperar.sh "$ALVO" "DAST" \
             docker run --rm --network host -v "$PWD/.zap:/zap/wrk:rw" "$ZAP" \
