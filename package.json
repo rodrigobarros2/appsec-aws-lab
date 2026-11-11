@@ -1,0 +1,11 @@
+{
+  "name": "appsec-aws-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "instalar": "npm ci --prefix app/corrigido && npm ci --prefix app/vulneravel",
+    "test": "node --test testes/seguranca.test.mjs",
+    "corrigido": "SEGREDOS_FONTE=env JWT_SECRET=troque-local WEBHOOK_SECRET=troque-local node app/corrigido/src/server.mjs",
+    "vulneravel": "node app/vulneravel/src/server.mjs"
+  }
+}

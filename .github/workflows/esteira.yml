@@ -1,0 +1,147 @@
+# Esteira de segurança. Cada verificação roda contra as duas versões:
+#   corrigido  -> precisa passar (é o gate de verdade de um projeto);
+#   vulneravel -> precisa ser barrada (prova de que a ferramenta pega a falha).
+# Ferramentas em imagens fixadas por versão E digest, e actions fixadas por SHA:
+# a própria esteira não pode ser a porta de entrada (supply chain).
+name: esteira-de-seguranca
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esteira-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+  SEMGREP: semgrep/semgrep:1.185.0@sha256:67518c174185a2043fdbed16c70631b79209499b3671178e7194379b48295a0d
+  OSV: ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
+  CHECKOV: bridgecrew/checkov:3.4.3@sha256:bfe9d70bb7f044aba49bd99675813445f106dee6072da583f51008cb667f3a63
+  HADOLINT: hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+  TRIVY: aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+  ZAP: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+
+jobs:
+  testes-de-seguranca:
+    name: testes de seguranca (IDOR, token forjado, valores do cliente, webhook, logs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm run instalar
+      - run: npm test
+
+  historico-sem-segredos:
+    name: segredos no historico do Git
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - run: docker run --rm -v "$PWD:/repo" "$GITLEAKS" git /repo --config /repo/.gitleaks.toml --redact --no-banner
+
+  terraform:
+    name: terraform fmt e validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.2
+      - run: terraform fmt -check -recursive infra
+      - name: validate
+        run: |
+          for dir in infra/corrigido infra/estado-bootstrap infra/vulneravel; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+  verificacoes:
+    name: ${{ matrix.verificacao }} (${{ matrix.alvo }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        alvo: [corrigido, vulneravel]
+        verificacao: [segredos, sast, dependencias, iac, container, dast]
+    env:
+      ALVO: ${{ matrix.alvo }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: segredos (gitleaks no codigo e na infra)
+        if: matrix.verificacao == 'segredos'
+        run: |
+          scripts/esperar.sh "$ALVO" "segredos" bash -c '
+            docker run --rm -v "$PWD:/repo" "$GITLEAKS" dir "/repo/app/$ALVO" --redact --no-banner &&
+            docker run --rm -v "$PWD:/repo" "$GITLEAKS" dir "/repo/infra/$ALVO" --redact --no-banner'
+
+      - name: SAST (semgrep com as regras da casa)
+        if: matrix.verificacao == 'sast'
+        run: |
+          scripts/esperar.sh "$ALVO" "SAST" \
+            docker run --rm -v "$PWD:/src" -w /src "$SEMGREP" \
+            semgrep scan --config .semgrep/ --error --metrics=off "app/$ALVO/src"
+
+      - name: SCA (osv-scanner nas dependencias)
+        if: matrix.verificacao == 'dependencias'
+        run: |
+          scripts/esperar.sh "$ALVO" "dependências" \
+            docker run --rm -v "$PWD:/src" "$OSV" scan source --lockfile "/src/app/$ALVO/package-lock.json"
+
+      - name: IaC (checkov no Terraform)
+        if: matrix.verificacao == 'iac'
+        run: |
+          dirs="infra/$ALVO"
+          if [ "$ALVO" = corrigido ]; then dirs="$dirs infra/estado-bootstrap"; fi
+          scripts/esperar.sh "$ALVO" "IaC" bash -c '
+            for d in '"$dirs"'; do
+              docker run --rm -v "$PWD:/src" "$CHECKOV" -d "/src/$d" --framework terraform --compact --quiet || exit $?
+            done'
+
+      - name: container (hadolint no Dockerfile e trivy na imagem)
+        if: matrix.verificacao == 'container'
+        run: |
+          scripts/esperar.sh "$ALVO" "Dockerfile" bash -c 'docker run --rm -i "$HADOLINT" < "app/$ALVO/Dockerfile"'
+          docker build -q -t "loja-api:$ALVO" "app/$ALVO"
+          scripts/esperar.sh "$ALVO" "imagem" \
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY" \
+            image --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress --scanners vuln "loja-api:$ALVO"
+
+      - name: DAST (OWASP ZAP baseline contra a API rodando)
+        if: matrix.verificacao == 'dast'
+        run: |
+          docker build -q -t "loja-api:$ALVO" "app/$ALVO"
+          docker run -d --name api -p 8080:8080 \
+            -e SEGREDOS_FONTE=env -e JWT_SECRET="$(openssl rand -hex 32)" -e WEBHOOK_SECRET="$(openssl rand -hex 32)" \
+            "loja-api:$ALVO"
+          curl -sf --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/saude
+          chmod a+w .zap
+          scripts/esperar.sh "$ALVO" "DAST" \
+            docker run --rm --network host -v "$PWD/.zap:/zap/wrk:rw" "$ZAP" \
+            zap-baseline.py -t http://localhost:8080/saude -c regras.tsv -I -r "relatorio-$ALVO.html"
+
+      - name: relatorio do ZAP
+        if: always() && matrix.verificacao == 'dast'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zap-${{ matrix.alvo }}
+          path: .zap/relatorio-${{ matrix.alvo }}.html
+          if-no-files-found: ignore

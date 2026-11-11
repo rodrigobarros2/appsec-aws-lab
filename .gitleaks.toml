@@ -1,0 +1,12 @@
+# Varredura do HISTÓRICO do repositório inteiro. Os segredos da versão
+# vulnerável são fictícios e plantados de propósito; ficam fora desta varredura
+# (a esteira por versão os procura e exige que sejam encontrados).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Segredos fictícios plantados no laboratório"
+paths = [
+  '''app/vulneravel/''',
+  '''infra/vulneravel/''',
+]

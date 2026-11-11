@@ -1,0 +1,10 @@
+{
+  "name": "loja-api-corrigida",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serviço fictício de pedidos e cupons — versão corrigida",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node src/server.mjs" },
+  "dependencies": { "jose": "6.2.17" }
+}

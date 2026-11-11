@@ -1,0 +1,8 @@
+node_modules/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.zip
+.zap/*.html
+.zap/*.json
+resultados/

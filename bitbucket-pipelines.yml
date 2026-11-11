@@ -1,0 +1,59 @@
+# Espelho da esteira (.github/workflows/esteira.yml) para Bitbucket Pipelines.
+# Aqui ela funciona como GATE da versão corrigida: é o que se coloca no
+# repositório de um produto real. As mesmas imagens, fixadas por versão e digest.
+# O DAST fica de fora: o Bitbucket não permite --network host no serviço Docker;
+# em produção, ele roda contra o ambiente de homologação depois do deploy.
+image: atlassian/default-image:4
+
+definitions:
+  services:
+    docker:
+      memory: 3072
+
+pipelines:
+  default:
+    - parallel:
+        steps:
+          - step:
+              name: testes de segurança
+              image: node:22.21.1-alpine3.22@sha256:b2358485e3e33bc3a33114d2b1bdb18cdbe4df01bd2b257198eb51beb1f026c5
+              script:
+                - npm run instalar
+                - npm test
+          - step:
+              name: segredos (gitleaks)
+              services: [docker]
+              script:
+                - export GITLEAKS=ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/repo" "$GITLEAKS" git /repo --config /repo/.gitleaks.toml --redact --no-banner
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/repo" "$GITLEAKS" dir /repo/app/corrigido --redact --no-banner
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/repo" "$GITLEAKS" dir /repo/infra/corrigido --redact --no-banner
+          - step:
+              name: SAST (semgrep)
+              services: [docker]
+              script:
+                - export SEMGREP=semgrep/semgrep:1.185.0@sha256:67518c174185a2043fdbed16c70631b79209499b3671178e7194379b48295a0d
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/src" -w /src "$SEMGREP" semgrep scan --config .semgrep/ --error --metrics=off app/corrigido/src
+          - step:
+              name: SCA (osv-scanner)
+              services: [docker]
+              script:
+                - export OSV=ghcr.io/google/osv-scanner:v2.7.1@sha256:a70ffffc2bfd33482953e5d6b64c6fcdb30239717a07b0f0d3ab2859ce3e4cde
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/src" "$OSV" scan source --lockfile /src/app/corrigido/package-lock.json
+          - step:
+              name: IaC (checkov)
+              services: [docker]
+              script:
+                - export CHECKOV=bridgecrew/checkov:3.4.3@sha256:bfe9d70bb7f044aba49bd99675813445f106dee6072da583f51008cb667f3a63
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/src" "$CHECKOV" -d /src/infra/corrigido --framework terraform --compact --quiet
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/src" "$CHECKOV" -d /src/infra/estado-bootstrap --framework terraform --compact --quiet
+          - step:
+              name: container (hadolint e trivy)
+              services: [docker]
+              script:
+                - export HADOLINT=hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+                - export TRIVY=aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+                - docker run --rm -i "$HADOLINT" < app/corrigido/Dockerfile
+                - docker build -t loja-api:corrigido app/corrigido
+                - docker save loja-api:corrigido -o imagem.tar
+                - docker run --rm -v "$BITBUCKET_CLONE_DIR:/src" "$TRIVY" image --input /src/imagem.tar --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress --scanners vuln

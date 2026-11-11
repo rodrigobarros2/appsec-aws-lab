@@ -1,0 +1,94 @@
+# Regras da casa: o que o time combinou que não entra no código.
+# Cada regra nasceu de um achado real do tipo (ver docs/achados.md).
+rules:
+  - id: segredo-no-codigo
+    message: >-
+      Segredo com valor no código-fonte. Guarde no AWS Secrets Manager (ou Vault)
+      e leia em tempo de execução; rotacione o valor que já foi versionado.
+    severity: ERROR
+    languages: [javascript]
+    patterns:
+      - pattern-either:
+          - pattern: const $NOME = "$VALOR";
+          - pattern: let $NOME = "$VALOR";
+      - metavariable-regex:
+          metavariable: $NOME
+          regex: (?i).*(secret|segredo|senha|password|token|api_?key|private_?key).*
+      - metavariable-regex:
+          metavariable: $VALOR
+          regex: ^.{16,}$
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+
+  - id: jwt-lido-sem-verificar
+    message: >-
+      jwt.decode() lê o token sem conferir a assinatura: qualquer pessoa forja um
+      token. Use jwtVerify (jose) com algoritmo e emissor fixos.
+    severity: ERROR
+    languages: [javascript]
+    pattern: jwt.decode(...)
+    metadata:
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "API2:2023 - Broken Authentication"
+
+  - id: assinatura-comparada-sem-tempo-constante
+    message: >-
+      Assinatura comparada com ==/!=/===/!==: o tempo da comparação vaza o valor
+      esperado. Use crypto.timingSafeEqual em Buffers do mesmo tamanho.
+    severity: ERROR
+    languages: [javascript]
+    patterns:
+      - pattern-either:
+          - pattern: $A == $B
+          - pattern: $A != $B
+          - pattern: $A === $B
+          - pattern: $A !== $B
+      - metavariable-regex:
+          metavariable: $A
+          regex: (?i).*(assinatura|signature|hmac).*
+    metadata:
+      cwe: "CWE-208: Observable Timing Discrepancy"
+
+  - id: valor-monetario-vindo-do-cliente
+    message: >-
+      Valor monetário lido do corpo da requisição. Preço, total e desconto são
+      calculados no servidor a partir do catálogo, do pedido e do cupom.
+    severity: ERROR
+    languages: [javascript]
+    patterns:
+      - pattern: corpo.$CAMPO
+      - metavariable-regex:
+          metavariable: $CAMPO
+          regex: ^(total|preco|valor|valorDesconto|desconto|subtotal)$
+    metadata:
+      cwe: "CWE-602: Client-Side Enforcement of Server-Side Security"
+      owasp: "API6:2023 - Unrestricted Access to Sensitive Business Flows"
+
+  - id: objeto-inteiro-no-log
+    message: >-
+      Evento ou corpo inteiro enviado ao log: telefone, e-mail e tokens vão junto
+      (LGPD). Registre só os campos necessários e mascare dados pessoais.
+    severity: ERROR
+    languages: [javascript]
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$F(..., JSON.stringify($OBJ), ...)
+          - pattern: $LOG.$F(..., $X + JSON.stringify($OBJ), ...)
+          - pattern: $LOG.$F(..., $OBJ, ...)
+      - metavariable-regex:
+          metavariable: $LOG
+          regex: ^(console|log|logger)$
+      - metavariable-regex:
+          metavariable: $OBJ
+          regex: ^(event|evento|corpo|body|req|pedido)$
+    metadata:
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+
+  - id: stack-trace-na-resposta
+    message: Detalhes internos do erro (stack) devolvidos ao cliente. Responda com mensagem genérica e registre o detalhe só no log.
+    severity: ERROR
+    languages: [javascript]
+    pattern: "{..., stack: $E.stack, ...}"
+    metadata:
+      cwe: "CWE-209: Generation of Error Message Containing Sensitive Information"

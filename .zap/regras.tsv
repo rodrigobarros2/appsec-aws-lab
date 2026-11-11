@@ -1,0 +1,5 @@
+10021	FAIL	(X-Content-Type-Options ausente)
+10036	FAIL	(Servidor anuncia versão no cabeçalho Server)
+10037	FAIL	(Servidor anuncia tecnologia no X-Powered-By)
+10038	FAIL	(Content-Security-Policy ausente)
+10098	FAIL	(CORS aberto para qualquer origem)
