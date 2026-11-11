@@ -1,0 +1,20 @@
+# Atualizações automáticas: imagens fixadas por digest, actions fixadas por SHA,
+# dependências npm e providers do Terraform. A esteira valida cada PR.
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /app/corrigido
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /app/corrigido
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directories: [/infra/corrigido, /infra/estado-bootstrap]
+    schedule:
+      interval: weekly

@@ -46,6 +46,10 @@ Cada falha plantada na versão vulnerável, quem a pega e como foi corrigida. As
 | C3 | `CMD` em forma de shell (sinais não chegam ao processo) | Hadolint `DL3025` | `CMD ["node", "src/server.mjs"]` |
 | C4 | Roda como root e leva npm na imagem final | Revisão | Build em dois estágios, `USER 1000:1000`, sem npm e corepack na imagem final |
 
+### Um achado real durante a construção
+
+Na primeira versão, a imagem corrigida usava `node:22.21.1-alpine3.22`. Na primeira execução, o Trivy **barrou a própria versão corrigida**: a base trazia 2 CVEs críticas no OpenSSL (`libcrypto3` e `libssl3`, CVE-2026-31789), já corrigidas na 3.5.6. A troca para `node:22.23.5-alpine3.24` resolveu. Isso mostra por que a imagem fixada por digest precisa de um scanner no gate: fixar garante reprodutibilidade, mas não garante atualização. Em produção, o Dependabot (ou o Renovate) abre o PR de atualização do digest, e a esteira valida.
+
 ## O que nenhuma ferramenta pegou sozinha
 
 IDOR (A1, A8), resgate duplo (A7) e a lógica do desconto (A6) só aparecem com **teste que pensa como atacante**: duas contas, repetição e valores fora do esperado. A esteira automatiza esse teste, mas alguém precisou pensar nele primeiro. É por isso que revisão de código e threat model continuam necessários mesmo com todas as ferramentas ligadas.
